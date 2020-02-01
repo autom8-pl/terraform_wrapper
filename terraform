@@ -1,0 +1,60 @@
+#!/bin/bash
+
+TERRAFORM_BIN=${HOME}/bin/terraform.bin
+
+terraform_do_upgrade() {
+    _SYSTEM=`uname -o`
+    _MACHINE=`uname -m`
+    declare -A _SYSTEM_MAP
+    _SYSTEM_MAP=( ["GNU/Linux"]="linux" )
+    _MACHINE_MAP=( ["x86_64"]="amd64" )
+    TERRAFORM_LATEST_VERSION=`curl -s https://api.github.com/repos/hashicorp/terraform/releases/latest | sed -n '/tag_name/s/\s\+\"tag_name\": \"v\([[:digit:]]\+.[[:digit:]]\+.[[:digit:]]\+\)\",/\1/p'`
+    TERRAFORM_ZIP_NAME=terraform_${TERRAFORM_LATEST_VERSION}_${_SYSTEM_MAP[$_SYSTEM]}_${_MACHINE_MAP[$_MACHINE]}.zip
+    TERRAFORM_ZIP_URL=https://releases.hashicorp.com/terraform/${TERRAFORM_LATEST_VERSION}/${TERRAFORM_ZIP_NAME}
+    TERRAFORM_SHA_URL=https://releases.hashicorp.com/terraform/${TERRAFORM_LATEST_VERSION}/terraform_${TERRAFORM_LATEST_VERSION}_SHA256SUMS
+    TERRAFORM_TMP=`mktemp -d`
+    cd ${TERRAFORM_TMP}
+    wget --quiet ${TERRAFORM_ZIP_URL}
+    wget --quiet ${TERRAFORM_SHA_URL}
+    sha256sum -c terraform_${TERRAFORM_LATEST_VERSION}_SHA256SUMS --ignore-missing --quiet --status
+    TERRAFORM_SHASUM_OK=$?
+    if [ ${TERRAFORM_SHASUM_OK} == 0 ]
+    then
+        unzip -q ${TERRAFORM_ZIP_NAME}
+        TERRAFORM_BIN_DIR=`dirname "${TERRAFORM_BIN}"`
+        if [ -e "${TERRAFORM_BIN_DIR}" ]
+        then
+            mkdir -p "${TERRAFORM_BIN_DIR}"
+        fi
+        mv terraform "${TERRAFORM_BIN}"
+    else
+        echo "SHA256 sum not match. Exiting."
+        exit 1
+    fi
+    cd - 2>&1 >/dev/null
+    rm -rf "${TERRAFORM_TMP}"
+}
+
+terraform_run() {
+    "${TERRAFORM_BIN}" $@
+}
+
+if [ -e "${TERRAFORM_BIN}" ]
+then
+    TERRAFORM_OUTDATED=`${TERRAFORM_BIN} --version | grep -c 'Your version of Terraform is out of date'`
+    if [ ${TERRAFORM_OUTDATED} == 1 ]
+    then
+        echo "Your version of Terraform is out of date! Upgrade?"
+        read -ep "Yes/No: " TERRAFORM_UPGRADE
+        case ${TERRAFORM_UPGRADE} in
+            "Yes") terraform_do_upgrade ;;
+            "yes") terraform_do_upgrade ;;
+            *) echo "Nothing to do here."
+        esac
+    fi
+    terraform_run $@
+else
+    echo "No terraform binary. Downloading..."
+    terraform_do_upgrade
+    terraform_run $@
+fi
